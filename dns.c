@@ -1,5 +1,7 @@
 #include <assert.h>
 #include <regex.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,23 +44,24 @@ typedef struct {
 
 #define MAX_NSERVERS 16
 typedef struct {
-  struct sockaddr addr[MAX_NSERVERS];
+  uint32_t ipv4_addr[MAX_NSERVERS];
+  size_t len;
 } nservers_t;
 
-static int parse_resolv_conf(nservers_t *ns) {
+static void parse_resolv_conf(nservers_t *ns) {
   FILE *f = fopen("/etc/resolv.conf", "r");
 
   char *line = NULL;
-  size_t len = 0, i = 0;
+  size_t len = 0, i = ns->len;
   ssize_t read;
-  uint8_t *d = (uint8_t *)&ns->addr;
+  uint8_t *d = (uint8_t *)&ns->ipv4_addr;
 
   while ((read = getline(&line, &len, f)) != -1) {
     if (sscanf(line, "nameserver %hhd.%hhd.%hhd.%hhd", &d[0], &d[1], &d[2],
                &d[3]) == 4) {
       if (i == MAX_NSERVERS)
         break;
-      d = (uint8_t *)&ns->addr[++i];
+      d = (uint8_t *)&ns->ipv4_addr[++i];
     };
   }
   if (line)
@@ -66,23 +69,11 @@ static int parse_resolv_conf(nservers_t *ns) {
 
 exit:
   fclose(f);
-  return i;
+  ns->len = i;
 }
 
-static int resolv_name(const char *hostname) {
-  int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
-  struct sockaddr_in address;
-  address.sin_family = AF_INET;
-  /* OpenDNS is currently at 208.67.222.222 (0xd043dede) */
-  address.sin_addr.s_addr = htonl(0xd043dede);
-  /* DNS runs on port 53 */
-  address.sin_port = htons(53);
-
-  /* Copy all fields into a single, concatenated packet */
-  size_t packetlen =
-      sizeof(dns_header_t) + strlen(hostname) + 2 + sizeof(dns_question_t);
-  uint8_t *packet = alloca(packetlen);
-
+static void fill_dns_req(uint8_t *packet, size_t packetlen,
+                         const char *hostname) {
   /* Set up the DNS header */
   dns_header_t *header = (dns_header_t *)packet;
   memset(header, 0, sizeof(dns_header_t));
@@ -116,23 +107,12 @@ static int resolv_name(const char *hostname) {
       count++;
   }
   *prev = count;
+}
 
-  /* Send the packet to OpenDNS, then request the response */
-  sendto(socketfd, packet, packetlen, 0, (struct sockaddr *)&address,
-         (socklen_t)sizeof(address));
-
-  socklen_t length = 0;
-  uint8_t response[512];
-  memset(&response, 0, 512);
-
-  /* Receive the response from OpenDNS into a local buffer */
-  ssize_t bytes = recvfrom(socketfd, response, 512, 0,
-                           (struct sockaddr *)&address, &length);
-  printf("Received %zd DNS\n", bytes);
-
+static bool parse_dns_resp(uint8_t *response) {
   dns_header_t *response_header = (dns_header_t *)response;
   if ((ntohs(response_header->flags) & 0xf) != 0) {
-    return 1;
+    return false;
   }
 
   /* Get a pointer to the start of the question name, and
@@ -154,16 +134,70 @@ static int resolv_name(const char *hostname) {
   inet_ntop(AF_INET, &rec->addr, buf, sizeof(buf));
   printf("IP: %s\n", buf);
 
-  return 0;
+  return true;
+}
+
+#define MAX_DNS_PACKET 512
+static bool resolv_name(nservers_t *ns, const char *hostname) {
+  int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  /* Copy all fields into a single, concatenated packet */
+  size_t packetlen =
+      sizeof(dns_header_t) + strlen(hostname) + 2 + sizeof(dns_question_t);
+  uint8_t *packet = alloca(packetlen);
+
+  fill_dns_req(packet, packetlen, hostname);
+
+  struct sockaddr_in address;
+  address.sin_family = AF_INET;
+  /* DNS runs on port 53 */
+  address.sin_port = htons(53);
+
+  for (int i = 0; i < ns->len; i++) {
+    address.sin_addr.s_addr = ns->ipv4_addr[i];
+  }
+
+  /* Send the packet to DNS server, then request the response */
+  sendto(socketfd, packet, packetlen, 0, (struct sockaddr *)&address,
+         (socklen_t)sizeof(address));
+
+  socklen_t length = 0;
+  uint8_t response[MAX_DNS_PACKET];
+  memset(&response, 0, MAX_DNS_PACKET);
+
+  /* Receive the response from DNS server into a local buffer */
+  ssize_t bytes = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
+                           (struct sockaddr *)&address, &length);
+  printf("Received %zd DNS\n", bytes);
+
+  if (!parse_dns_resp(response))
+    return false;
+
+  return true;
+}
+
+static void add_predefined_ns(nservers_t *ns, ...) {
+  va_list ap;
+  int argno = 0;
+  uint32_t ipv4_addr;
+
+  va_start(ap, ns);
+  while ((ipv4_addr = va_arg(ap, uint32_t)) && ns->len < MAX_NSERVERS) {
+    ns->ipv4_addr[ns->len++] = ipv4_addr;
+  }
+  va_end(ap);
 }
 
 int main() {
   nservers_t ns;
+  ns.len = 0;
 
-  int n = parse_resolv_conf(&ns);
-  for (int i = 0; i < n; i++) {
-    uint32_t *ipv4 = (uint32_t *)&ns.addr[i];
-    printf("%X\n", ntohl(*ipv4));
+  add_predefined_ns(&ns, 0xd043dede /* 208.67.222.222 */,
+                    0x01010101 /* 1.1.1.1 */, 0);
+  parse_resolv_conf(&ns);
+
+  for (int i = 0; i < ns.len; i++) {
+    printf("%X\n", ntohl(ns.ipv4_addr[i]));
   }
-  resolv_name("ya.ru");
+  resolv_name(&ns, "ya.ru");
 }
