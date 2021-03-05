@@ -1,4 +1,4 @@
-CFLAGS=-O1 -g -fsanitize=address -fno-omit-frame-pointer
+CFLAGS=-O1 -g -fsanitize=address -fno-omit-frame-pointer -g
 
 dns: dns.o tools.o
 	$(CC) $(CFLAGS) -o $@ $^

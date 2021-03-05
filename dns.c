@@ -48,8 +48,16 @@ typedef struct {
   size_t len;
 } nservers_t;
 
-static void parse_resolv_conf(nservers_t *ns) {
+#define MAX_ARECORDS 16
+typedef struct {
+  uint32_t ipv4_addr[MAX_ARECORDS];
+  size_t len;
+} a_record_t;
+
+static bool parse_resolv_conf(nservers_t *ns) {
   FILE *f = fopen("/etc/resolv.conf", "r");
+  if (!f)
+    return false;
 
   char *line = NULL;
   size_t len = 0, i = ns->len;
@@ -70,6 +78,7 @@ static void parse_resolv_conf(nservers_t *ns) {
 exit:
   fclose(f);
   ns->len = i;
+  return true;
 }
 
 static void fill_dns_req(uint8_t *packet, size_t packetlen,
@@ -109,7 +118,7 @@ static void fill_dns_req(uint8_t *packet, size_t packetlen,
   *prev = count;
 }
 
-static bool parse_dns_resp(uint8_t *response) {
+static bool parse_dns_resp(uint8_t *response, a_record_t *srv) {
   dns_header_t *response_header = (dns_header_t *)response;
   if ((ntohs(response_header->flags) & 0xf) != 0) {
     return false;
@@ -138,9 +147,11 @@ static bool parse_dns_resp(uint8_t *response) {
 }
 
 #define MAX_DNS_PACKET 512
-static bool resolv_name(nservers_t *ns, const char *hostname) {
+#define DNS_TIMEOUT 5 // seconds
+
+static bool resolv_name(nservers_t *ns, const char *hostname, a_record_t *srv) {
   int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
-  struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+  struct timeval tv = {.tv_sec = DNS_TIMEOUT, .tv_usec = 0};
   setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
   /* Copy all fields into a single, concatenated packet */
@@ -157,6 +168,7 @@ static bool resolv_name(nservers_t *ns, const char *hostname) {
 
   uint8_t response[MAX_DNS_PACKET];
   memset(&response, 0, MAX_DNS_PACKET);
+  ssize_t bytes;
 
   for (int i = 0; i < ns->len; i++) {
     address.sin_addr.s_addr = ntohl(ns->ipv4_addr[i]);
@@ -167,8 +179,8 @@ static bool resolv_name(nservers_t *ns, const char *hostname) {
 
     socklen_t length = 0;
     /* Receive the response from DNS server into a local buffer */
-    ssize_t bytes = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
-                             (struct sockaddr *)&address, &length);
+    bytes = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
+                     (struct sockaddr *)&address, &length);
     if (bytes > 0)
       break;
 #if 1
@@ -176,7 +188,7 @@ static bool resolv_name(nservers_t *ns, const char *hostname) {
 #endif
   }
 
-  if (!parse_dns_resp(response))
+  if (!parse_dns_resp(response, srv))
     return false;
 
   return true;
@@ -194,16 +206,22 @@ static void add_predefined_ns(nservers_t *ns, ...) {
   va_end(ap);
 }
 
+static void print_nservers(nservers_t *ns) {
+  for (int i = 0; i < ns->len; i++) {
+    printf("%X\n", ntohl(ns->ipv4_addr[i]));
+  }
+}
+
 int main() {
   nservers_t ns;
   ns.len = 0;
 
-  add_predefined_ns(&ns, 0xc0a81c06, 0xd043dede /* 208.67.222.222 */,
+  add_predefined_ns(&ns, 0xd043dede /* 208.67.222.222 */,
                     0x01010101 /* 1.1.1.1 */, 0);
-  parse_resolv_conf(&ns);
+  if (!parse_resolv_conf(&ns))
+    return EXIT_FAILURE;
+  print_nservers(&ns);
 
-  for (int i = 0; i < ns.len; i++) {
-    printf("%X\n", ntohl(ns.ipv4_addr[i]));
-  }
-  resolv_name(&ns, "ya.ru");
+  a_record_t srv;
+  resolv_name(&ns, "google.com", &srv);
 }

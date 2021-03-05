@@ -1,3 +1,4 @@
 dns
 *.dSYM
 *.o
+.compile_flags.txt
