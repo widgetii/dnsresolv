@@ -54,7 +54,7 @@ static void parse_resolv_conf(nservers_t *ns) {
   char *line = NULL;
   size_t len = 0, i = ns->len;
   ssize_t read;
-  uint8_t *d = (uint8_t *)&ns->ipv4_addr;
+  uint8_t *d = (uint8_t *)&ns->ipv4_addr[i];
 
   while ((read = getline(&line, &len, f)) != -1) {
     if (sscanf(line, "nameserver %hhd.%hhd.%hhd.%hhd", &d[0], &d[1], &d[2],
@@ -192,9 +192,9 @@ int main() {
   nservers_t ns;
   ns.len = 0;
 
+  parse_resolv_conf(&ns);
   add_predefined_ns(&ns, 0xd043dede /* 208.67.222.222 */,
                     0x01010101 /* 1.1.1.1 */, 0);
-  parse_resolv_conf(&ns);
 
   for (int i = 0; i < ns.len; i++) {
     printf("%X\n", ntohl(ns.ipv4_addr[i]));
