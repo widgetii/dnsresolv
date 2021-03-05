@@ -1,5 +1,7 @@
 #include <assert.h>
+#include <regex.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +13,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include "tools.h"
 
 typedef struct {
   uint16_t xid;     /* Randomly chosen identifier */
@@ -35,6 +39,29 @@ typedef struct {
   uint16_t length;
   struct in_addr addr;
 } __attribute__((packed)) dns_record_a_t;
+
+static void parse_resolv_conf() {
+  FILE *f = fopen("/etc/resolv.conf", "r");
+
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+
+  uint8_t d[4];
+
+  while ((read = getline(&line, &len, f)) != -1) {
+    if (sscanf(line, "nameserver %hhd.%hhd.%hhd.%hhd", &d[0], &d[1], &d[2], &d[3]) ==
+        4) {
+      uint32_t *ipv4 = (uint32_t*)d;
+      printf("%X\n", ntohl(*ipv4));
+    };
+  }
+  if (line)
+    free(line);
+
+exit:
+  fclose(f);
+}
 
 static int resolv_name(const char *hostname) {
   int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -124,4 +151,7 @@ static int resolv_name(const char *hostname) {
   return 0;
 }
 
-int main() { resolv_name("ya.ru"); }
+int main() {
+  parse_resolv_conf();
+  resolv_name("ya.ru");
+}

@@ -1,2 +1,3 @@
 dns
 *.dSYM
+*.o
