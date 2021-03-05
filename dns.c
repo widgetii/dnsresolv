@@ -16,6 +16,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "dns.h"
+#include "http.h"
 #include "tools.h"
 
 typedef struct {
@@ -44,18 +46,6 @@ typedef struct {
   uint16_t length;
   uint32_t addr;
 } __attribute__((packed)) dns_record_a_t;
-
-#define MAX_NSERVERS 16
-typedef struct {
-  uint32_t ipv4_addr[MAX_NSERVERS];
-  size_t len;
-} nservers_t;
-
-#define MAX_ARECORDS 16
-typedef struct {
-  uint32_t ipv4_addr[MAX_ARECORDS];
-  size_t len;
-} a_record_t;
 
 static bool parse_resolv_conf(nservers_t *ns) {
   FILE *f = fopen("/etc/resolv.conf", "r");
@@ -242,7 +232,9 @@ int main() {
   print_nservers(&ns);
 
   a_record_t srv;
-  if (resolv_name(&ns, "google.com", &srv)) {
+  if (resolv_name(&ns, "ifconfig.me", &srv)) {
     print_a_records(&srv);
+
+    download(STDOUT_FILENO, &srv, "ifconfig.me", "");
   }
 }
