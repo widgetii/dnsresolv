@@ -32,6 +32,9 @@ typedef struct {
   uint16_t dnsclass; /* The QCLASS (1 = IN) */
 } __attribute__((packed)) dns_question_t;
 
+#define TYPE_A_RECORD 1
+#define TYPE_CNAME_RECORD 5
+
 /* Structure of the bytes for an IPv4 answer */
 typedef struct {
   uint16_t compression;
@@ -39,7 +42,7 @@ typedef struct {
   uint16_t class;
   uint32_t ttl;
   uint16_t length;
-  struct in_addr addr;
+  uint32_t addr;
 } __attribute__((packed)) dns_record_a_t;
 
 #define MAX_NSERVERS 16
@@ -137,11 +140,17 @@ static bool parse_dns_resp(uint8_t *response, ssize_t rlen, a_record_t *srv) {
   }
   *field_length = '\0'; /* Null terminate the name */
 
+  srv->len = 0;
   dns_record_a_t *rec = (dns_record_a_t *)(field_length + 5);
-  printf("record: %s\n", start_of_name + 1);
-  char buf[INET_ADDRSTRLEN];
-  inet_ntop(AF_INET, &rec->addr, buf, sizeof(buf));
-  printf("IP: %s\n", buf);
+  while ((uint8_t *)rec < response + rlen) {
+    if (srv->len == MAX_ARECORDS)
+      break;
+
+    if (ntohs(rec->type) == TYPE_A_RECORD) {
+      srv->ipv4_addr[srv->len++] = rec->addr;
+    }
+    rec = (dns_record_a_t *)((uint8_t *)rec + ntohs(rec->length) + 12);
+  }
 
   return true;
 }
@@ -208,7 +217,17 @@ static void add_predefined_ns(nservers_t *ns, ...) {
 
 static void print_nservers(nservers_t *ns) {
   for (int i = 0; i < ns->len; i++) {
-    printf("%X\n", ntohl(ns->ipv4_addr[i]));
+    char buf[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &ns->ipv4_addr[i], buf, sizeof(buf));
+    printf("nameserver %s\n", buf);
+  }
+}
+
+static void print_a_records(a_record_t *srv) {
+  for (int i = 0; i < srv->len; i++) {
+    char buf[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &srv->ipv4_addr[i], buf, sizeof(buf));
+    printf("IP: %s\n", buf);
   }
 }
 
@@ -223,5 +242,7 @@ int main() {
   print_nservers(&ns);
 
   a_record_t srv;
-  resolv_name(&ns, "google.com", &srv);
+  if (resolv_name(&ns, "google.com", &srv)) {
+    print_a_records(&srv);
+  }
 }
