@@ -111,7 +111,7 @@ static void fill_dns_req(uint8_t *packet, size_t packetlen,
   *prev = count;
 }
 
-static bool parse_dns_resp(uint8_t *response, ssize_t rlen, a_record_t *srv) {
+static bool parse_dns_resp(uint8_t *response, ssize_t rlen, a_records_t *srv) {
   dns_header_t *response_header = (dns_header_t *)response;
   if ((ntohs(response_header->flags) & 0xf) != 0) {
     return false;
@@ -148,7 +148,7 @@ static bool parse_dns_resp(uint8_t *response, ssize_t rlen, a_record_t *srv) {
 #define MAX_DNS_PACKET 512
 #define DNS_TIMEOUT 5 // seconds
 
-static bool resolv_name(nservers_t *ns, const char *hostname, a_record_t *srv) {
+bool resolv_name(nservers_t *ns, const char *hostname, a_records_t *srv) {
   int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
   struct timeval tv = {.tv_sec = DNS_TIMEOUT, .tv_usec = 0};
   setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -213,7 +213,7 @@ static void print_nservers(nservers_t *ns) {
   }
 }
 
-static void print_a_records(a_record_t *srv) {
+static void print_a_records(a_records_t *srv) {
   for (int i = 0; i < srv->len; i++) {
     char buf[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &srv->ipv4_addr[i], buf, sizeof(buf));
@@ -231,10 +231,10 @@ int main() {
     return EXIT_FAILURE;
   print_nservers(&ns);
 
-  a_record_t srv;
+  a_records_t srv;
   if (resolv_name(&ns, "ifconfig.me", &srv)) {
     print_a_records(&srv);
-
-    download(STDOUT_FILENO, &srv, "ifconfig.me", "");
   }
+
+  download("ifconfig.me", "", &ns, STDOUT_FILENO);
 }

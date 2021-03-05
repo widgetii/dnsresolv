@@ -11,7 +11,8 @@ typedef struct {
 typedef struct {
   uint32_t ipv4_addr[MAX_ARECORDS];
   size_t len;
-} a_record_t;
+} a_records_t;
 
+bool resolv_name(nservers_t *ns, const char *hostname, a_records_t *srv);
 
 #endif /* DNS_H */

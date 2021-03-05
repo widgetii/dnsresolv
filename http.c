@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,8 +35,13 @@ static int get_http_respcode(const char *inpbuf) {
 
 #undef NDEBUG
 
-int download(int writefd, a_record_t *srv, char *hostname, char *uri) {
+int download(char *hostname, char *uri, nservers_t *ns, int writefd) {
   int ret = ERR_GENERAL;
+
+  a_records_t srv;
+  if (!resolv_name(ns, hostname, &srv)) {
+    return ERR_GETADDRINFO;
+  }
 
   int s = socket(AF_INET, SOCK_STREAM, 0);
   struct sockaddr_in addr;
@@ -43,8 +49,8 @@ int download(int writefd, a_record_t *srv, char *hostname, char *uri) {
   addr.sin_family = AF_INET;
   addr.sin_port = htons(80);
 
-  for (int i = 0; i < srv->len; i++) {
-    memcpy(&addr.sin_addr, &srv->ipv4_addr[i], sizeof(uint32_t));
+  for (int i = 0; i < srv.len; i++) {
+    memcpy(&addr.sin_addr, &srv.ipv4_addr[i], sizeof(uint32_t));
 
 #ifndef NDEBUG
     char buf[256];
@@ -53,12 +59,13 @@ int download(int writefd, a_record_t *srv, char *hostname, char *uri) {
 #endif
 
     if (connect(s, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+      ret = ERR_GENERAL;
       break;
     }
     ret = ERR_CONNECT;
   }
 
-  if (s < 0) {
+  if (ret == ERR_CONNECT) {
     return ret;
   }
 
