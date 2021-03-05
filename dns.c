@@ -118,7 +118,7 @@ static void fill_dns_req(uint8_t *packet, size_t packetlen,
   *prev = count;
 }
 
-static bool parse_dns_resp(uint8_t *response, a_record_t *srv) {
+static bool parse_dns_resp(uint8_t *response, ssize_t rlen, a_record_t *srv) {
   dns_header_t *response_header = (dns_header_t *)response;
   if ((ntohs(response_header->flags) & 0xf) != 0) {
     return false;
@@ -168,7 +168,7 @@ static bool resolv_name(nservers_t *ns, const char *hostname, a_record_t *srv) {
 
   uint8_t response[MAX_DNS_PACKET];
   memset(&response, 0, MAX_DNS_PACKET);
-  ssize_t bytes;
+  ssize_t rlen;
 
   for (int i = 0; i < ns->len; i++) {
     address.sin_addr.s_addr = ntohl(ns->ipv4_addr[i]);
@@ -179,16 +179,16 @@ static bool resolv_name(nservers_t *ns, const char *hostname, a_record_t *srv) {
 
     socklen_t length = 0;
     /* Receive the response from DNS server into a local buffer */
-    bytes = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
-                     (struct sockaddr *)&address, &length);
-    if (bytes > 0)
+    rlen = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
+                    (struct sockaddr *)&address, &length);
+    if (rlen > 0)
       break;
-#if 1
+#if 0
     fprintf(stderr, "Timeout for %x\n", address.sin_addr.s_addr);
 #endif
   }
 
-  if (!parse_dns_resp(response, srv))
+  if (!parse_dns_resp(response, rlen, srv))
     return false;
 
   return true;
