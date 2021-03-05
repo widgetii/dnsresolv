@@ -40,20 +40,25 @@ typedef struct {
   struct in_addr addr;
 } __attribute__((packed)) dns_record_a_t;
 
-static void parse_resolv_conf() {
+#define MAX_NSERVERS 16
+typedef struct {
+  struct sockaddr addr[MAX_NSERVERS];
+} nservers_t;
+
+static int parse_resolv_conf(nservers_t *ns) {
   FILE *f = fopen("/etc/resolv.conf", "r");
 
   char *line = NULL;
-  size_t len = 0;
+  size_t len = 0, i = 0;
   ssize_t read;
-
-  uint8_t d[4];
+  uint8_t *d = (uint8_t *)&ns->addr;
 
   while ((read = getline(&line, &len, f)) != -1) {
-    if (sscanf(line, "nameserver %hhd.%hhd.%hhd.%hhd", &d[0], &d[1], &d[2], &d[3]) ==
-        4) {
-      uint32_t *ipv4 = (uint32_t*)d;
-      printf("%X\n", ntohl(*ipv4));
+    if (sscanf(line, "nameserver %hhd.%hhd.%hhd.%hhd", &d[0], &d[1], &d[2],
+               &d[3]) == 4) {
+      if (i == MAX_NSERVERS)
+        break;
+      d = (uint8_t *)&ns->addr[++i];
     };
   }
   if (line)
@@ -61,6 +66,7 @@ static void parse_resolv_conf() {
 
 exit:
   fclose(f);
+  return i;
 }
 
 static int resolv_name(const char *hostname) {
@@ -152,6 +158,12 @@ static int resolv_name(const char *hostname) {
 }
 
 int main() {
-  parse_resolv_conf();
+  nservers_t ns;
+
+  int n = parse_resolv_conf(&ns);
+  for (int i = 0; i < n; i++) {
+    uint32_t *ipv4 = (uint32_t *)&ns.addr[i];
+    printf("%X\n", ntohl(*ipv4));
+  }
   resolv_name("ya.ru");
 }
