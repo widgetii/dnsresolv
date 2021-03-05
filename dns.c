@@ -140,6 +140,8 @@ static bool parse_dns_resp(uint8_t *response) {
 #define MAX_DNS_PACKET 512
 static bool resolv_name(nservers_t *ns, const char *hostname) {
   int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
+  struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+  setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
   /* Copy all fields into a single, concatenated packet */
   size_t packetlen =
@@ -153,22 +155,26 @@ static bool resolv_name(nservers_t *ns, const char *hostname) {
   /* DNS runs on port 53 */
   address.sin_port = htons(53);
 
-  for (int i = 0; i < ns->len; i++) {
-    address.sin_addr.s_addr = ns->ipv4_addr[i];
-  }
-
-  /* Send the packet to DNS server, then request the response */
-  sendto(socketfd, packet, packetlen, 0, (struct sockaddr *)&address,
-         (socklen_t)sizeof(address));
-
-  socklen_t length = 0;
   uint8_t response[MAX_DNS_PACKET];
   memset(&response, 0, MAX_DNS_PACKET);
 
-  /* Receive the response from DNS server into a local buffer */
-  ssize_t bytes = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
-                           (struct sockaddr *)&address, &length);
-  printf("Received %zd DNS\n", bytes);
+  for (int i = 0; i < ns->len; i++) {
+    address.sin_addr.s_addr = ntohl(ns->ipv4_addr[i]);
+
+    /* Send the packet to DNS server, then request the response */
+    sendto(socketfd, packet, packetlen, 0, (struct sockaddr *)&address,
+           (socklen_t)sizeof(address));
+
+    socklen_t length = 0;
+    /* Receive the response from DNS server into a local buffer */
+    ssize_t bytes = recvfrom(socketfd, response, MAX_DNS_PACKET, 0,
+                             (struct sockaddr *)&address, &length);
+    if (bytes > 0)
+      break;
+#if 1
+    fprintf(stderr, "Timeout for %x\n", address.sin_addr.s_addr);
+#endif
+  }
 
   if (!parse_dns_resp(response))
     return false;
@@ -192,9 +198,9 @@ int main() {
   nservers_t ns;
   ns.len = 0;
 
-  parse_resolv_conf(&ns);
-  add_predefined_ns(&ns, 0xd043dede /* 208.67.222.222 */,
+  add_predefined_ns(&ns, 0xc0a81c06, 0xd043dede /* 208.67.222.222 */,
                     0x01010101 /* 1.1.1.1 */, 0);
+  parse_resolv_conf(&ns);
 
   for (int i = 0; i < ns.len; i++) {
     printf("%X\n", ntohl(ns.ipv4_addr[i]));
