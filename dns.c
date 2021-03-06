@@ -63,7 +63,7 @@ static bool parse_resolv_conf(nservers_t *ns) {
       if (i == MAX_NSERVERS)
         break;
       d = (uint8_t *)&ns->ipv4_addr[++i];
-    };
+    }
   }
   if (line)
     free(line);
